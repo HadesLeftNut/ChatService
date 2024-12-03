@@ -8,7 +8,7 @@ C# WCF Chat Service, Polling, WPF
 1 Computer runs Service
 2 Computers run Client
 
-Connection over phone Hotspot
+Connection over phone Hotspot with Discovery Service
 
 Client code:
 has 3 TextBoxes (OutputBox for *currently* status updates and display of messages / InputBox for sending messages / UserList for later to display names of users connected to the service)
