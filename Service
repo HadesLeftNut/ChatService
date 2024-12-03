@@ -1,0 +1,136 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.ServiceModel;
+using System.ServiceModel.Discovery;
+using System.Threading;
+
+namespace WCF_Service
+{   //Arnold
+    [ServiceContract]
+    public interface IChat
+    {
+        [OperationContract]
+        string WhichServiceAmI();// name of service
+
+        [OperationContract]
+        void RegisterClient(string machineName);// register client with machine name
+
+
+        [OperationContract]
+        void SendMessage(string message);// send a message
+
+
+        [OperationContract]
+        string ReceiveMessages(string machineName);// receive a message
+
+        [OperationContract]
+        void Test(); // just to see if client is connected to service and can communicate with it
+    }
+
+    public class ChatService : IChat
+    {
+        private const int BufferSize = 100; //size of messages array !!! idea: array is filled with messages
+                                            //from clients and when it reaches 100 it goes back to index 0
+                                            //and overwrites old messages instead
+        private static string[] messages = new string[BufferSize]; //messages array
+        private static DateTime[] timestamps = new DateTime[BufferSize]; //time stamps of the messages with the same array size
+        private static int currentIndex = 0; //the current index of the messages
+        private static ConcurrentDictionary<string, int> clientIndex = new ConcurrentDictionary<string, int>(); //idea: binding the machine name with an index so that
+                                                                                                                //every user has an index which tells the service what
+                                                                                                                //is the last message they have received.
+                                                                                                                //Concurrent is (dont quote me on this) good when working
+                                                                                                                //with threads
+        private int nextIndex = 0; // ngl still trying to figure this one out
+
+        public string WhichServiceAmI()
+        {
+            return "CrazyChatService"; //simply returns to OutputBox the name of the service
+        }
+
+        public void Test()
+        {
+            Console.WriteLine("Test"); // button test
+        }
+
+        public void RegisterClient(string machineName) // method that registers the client with the machine name
+        {
+            Console.WriteLine("hallo: " + machineName); // this is the ISSUE method. it does not work when trying to connect more than 1 laptop
+                                                        // also doesnt work if client isnt running from the same computer as the service
+            if (!clientIndex.ContainsKey(machineName))
+            {
+                if (!clientIndex.TryAdd(machineName, nextIndex)) throw new Exception(); // tried fixing issue with TryAdd, ClientIndex is supposed to be
+                                                                                        // who the user is based on his machine name
+                Console.WriteLine($"[{DateTime.Now}] Client '{machineName}' registered with index {nextIndex}.");
+            }
+            else
+            {
+                Console.WriteLine($"[{DateTime.Now}] Client '{machineName}' is already registered with index {clientIndex[machineName]}.");
+            }
+        }
+
+        public void SendMessage(string message)
+        {
+            ThreadPool.QueueUserWorkItem(_ => // threadPool supposedly works well here in case people send multiple messages from different clients
+            {
+                int index = Interlocked.Increment(ref currentIndex) % BufferSize; // this is where the messages index gets incremented with interlocked so that there arent
+                                                                                  // multiple increments at once
+                                                                                  // % BufferSize loops the array when the index reaches 100, 200, 300, etc
+                messages[index] = message;
+                timestamps[index] = DateTime.Now;
+                Console.WriteLine($"[{timestamps[index]}] Message received: {message}"); //update in the console when someone receives a message
+            });
+        }
+
+        public string ReceiveMessages(string machineName)
+        {
+            int messageIndex = clientIndex[machineName]; // receives the index that the specific user is at to know how many messages they are behind
+            string result = ""; // would have the contents of the timestamp and the message
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                if (messageIndex < currentIndex) // compares user index with internal index of the messages array
+                {
+                    int adjustedIndex = messageIndex % BufferSize; // i guess this was to update the index of the messages array but why would this be in the receive
+                                                                   // method (its already in the send method)
+                    result = $"{messages[adjustedIndex]} (Sent at: {timestamps[adjustedIndex]})"; // here i think i know what the issue is, i would change the code
+                                                                                                  // entirely and make a for (...) thing with
+                                                                                                  // currentIndex - messageIndex = how many messages behind the user is and how many he has to see
+                    clientIndex[machineName] = messageIndex + 1;
+                    Console.WriteLine($"[{DateTime.Now}] Message sent to '{machineName}': {result}");
+                }
+                else
+                {
+                    result = "No new messages.";
+                }
+            });
+
+            while (string.IsNullOrEmpty(result))
+            {
+                Thread.Sleep(10);
+            }
+
+            return result;
+        }
+    }
+
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("Chat Service wird gestartet...");
+
+            ServiceHost host = new ServiceHost(typeof(ChatService));
+            host.Description.Behaviors.Add(new ServiceDiscoveryBehavior());
+            host.AddServiceEndpoint(new UdpDiscoveryEndpoint());
+            host.AddServiceEndpoint(typeof(IChat), new WSHttpBinding(SecurityMode.None), "http://localhost:2310/ChatService");
+
+            host.Open();
+            Console.WriteLine("Service mit Discovery wird gestartet...");
+            Console.WriteLine("Drücke 'ENTER', um den Service zu beenden.");
+            Console.ReadLine();
+
+            host.Close();
+        }
+    }
+}
