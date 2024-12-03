@@ -1,0 +1,133 @@
+using System;
+using System.ServiceModel; // WCF service communication
+using System.ServiceModel.Discovery; // enables service discovery
+using System.Text;
+using System.Threading.Tasks; // asynchronous programming
+using System.Windows;
+
+namespace WPF_Client 
+{
+    [ServiceContract] // interface as a WCF service contract
+    public interface IChat // Interface defining methods for the WCF service
+    {
+        [OperationContract] // method accessible via WCF
+        string WhichServiceAmI(); // Method service name
+
+        [OperationContract]
+        void RegisterClient(string machineName); // Method client register with machine name
+
+        [OperationContract]
+        void SendMessage(string message); // Method send a message
+
+        [OperationContract]
+        string ReceiveMessages(string machineName); // Method receive a message
+
+        [OperationContract]
+        void Test();
+    }
+
+    public partial class MainWindow : Window // Partial class for the WPF main window
+    {
+        private IChat chatService; // Field to hold the reference to the WCF service
+        private string machineName; // Field to store the name of the client's machine
+
+        public MainWindow()
+        {
+            InitializeComponent();
+
+            machineName = Environment.MachineName; // Gets the name of the current machine
+
+            string serviceUrl = FindServiceUrl(); // method called to find the service URL dynamically
+            if (string.IsNullOrEmpty(serviceUrl)) // Check if no service URL was found
+            {
+                MessageBox.Show("No service found. Please make sure the service is running.");
+                return;
+            }
+
+            WSHttpBinding binding = new WSHttpBinding(SecurityMode.None); // Configure a WCF binding with no security
+            EndpointAddress address = new EndpointAddress(serviceUrl); // Specify the service endpoint address
+            ChannelFactory<IChat> channelFactory = new ChannelFactory<IChat>(binding, address); // Create factory for service communication
+
+            chatService = channelFactory.CreateChannel(); // Create channel to communicate with the service
+
+            RegisterClient(); // Register the client with the service
+        }
+
+        private string FindServiceUrl() // Method to find the service URL dynamically
+        {
+            DiscoveryClient discoveryClient = new DiscoveryClient(new UdpDiscoveryEndpoint()); // Creates a discovery client for UDP discovery
+
+            FindCriteria findCriteria = new FindCriteria(typeof(IChat)); // Sets criteria to find services implementing the IChat interface
+            findCriteria.Duration = TimeSpan.FromSeconds(3); // Sets the discovery timeout to 3 seconds
+
+            FindResponse findResponse = discoveryClient.Find(findCriteria); // Searches for matching services
+
+            if (findResponse.Endpoints.Count > 0) // Checks if any services were found
+            {
+                return findResponse.Endpoints[0].Address.Uri.ToString(); // Returns the URL of the first service found
+            }
+            else
+            {
+                return null; // Returns null if no services were found
+            }
+        }
+
+        private void RegisterClient() // Method to register the client with the service
+        {
+            try
+            {
+                chatService.RegisterClient(machineName); // service to register the client
+                OutputBox.Text = $"Client '{machineName}' registered successfully.";
+            }
+            catch (Exception)
+            {
+                OutputBox.Text = "Error registering client.";
+            }
+        }
+
+        private void WhichServiceAmIButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string serviceName = chatService.WhichServiceAmI(); // service gets its name
+                OutputBox.Text = "Service Name: " + serviceName; // Displays the service name
+            }
+            catch (Exception)
+            {
+                OutputBox.Text = "An error occurred while retrieving the service name.";
+            }
+        }
+
+        private void SendMessageButton_Click(object sender, RoutedEventArgs e) 
+        {
+            try
+            {
+                string message = MessageInput.Text; // gets message from inputbox
+                chatService.SendMessage(message); // sends to service
+                MessageInput.Text = ""; // clears content
+            }
+            catch (Exception)
+            {
+                OutputBox.Text = "An error occurred while sending the message.";
+            }
+        }
+
+        private async void ReceiveMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string receivedMessage = await Task.Run(() => chatService.ReceiveMessages(machineName)); // service to asynchronously get messages
+                OutputBox.Text = receivedMessage != null ? "Received Message: " + receivedMessage : "No new messages."; // Displays the received message or a "no new messages" message
+            }
+            catch (Exception)
+            {
+                OutputBox.Text = "An error occurred while receiving messages.";
+            }
+        }
+
+        private void Button_Click(object sender, RoutedEventArgs e)
+        {
+            chatService.Test();
+        }
+    }
+}
